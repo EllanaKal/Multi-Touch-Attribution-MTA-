@@ -1,0 +1,87 @@
+If a user reaches this channel, what is the probability they will end up converting, cross-selling, or dropping off?
+
+interpretations:
+
+* Affiliate
+62.5% chance of conversion
+12.5% chance of cross-sell
+25% chance of dropoff
+
+→ Affiliate is a strong conversion driver.
+
+* App
+0% conversion
+100% cross-sell
+0% dropoff
+
+→ App is not where users convert directly—it’s a pure cross-sell node.
+
+* Email
+46.9% conversion
+34.4% cross-sell
+18.8% dropoff
+
+→ Email is a balanced channel with good conversion and cross-sell potential.
+
+* Paid_search
+54.7% conversion
+23.4% cross-sell
+21.8% dropoff
+
+→ Paid search has healthy conversion rate but slightly higher dropoff than email.
+
+* Start
+55.6% conversion rate overall from initial distribution
+22.2% cross-sell
+22.2% dropoff
+
+→ From the moment a user enters your ecosystem, there is a 56% chance they convert eventually on average.
+
+Summary:
+Web is the core conversion hub — all conversions eventually go through web.
+Direct, email, social, affiliate, paid search are contributing channels, with direct and email being most important outside web.
+App contributes nothing to conversions — only cross-sell.
+
+Action: Allocate credit to channels based on their true contribution, not just last-click.
+Action: Focus spend on channels that actually move conversions, rather than just sending traffic.
+
+Channels like affiliate, direct, social, web have highest dropoff (25%).
+Email and paid_search have slightly lower dropoff.
+App has 0% dropoff but no conversions — it’s a dead-end for conversion, only cross-sell.
+
+Action:Identify why users drop off at web, direct, social.
+Action:Adjust UX, retargeting, messaging, or journey sequencing to reduce dropoff.
+
+
+
+✅ 2. Expected Steps to Absorption — “How long until users churn/convert?”
+
+This tells you:
+From each channel, how many steps does it usually take until a user completes an outcome?
+
+email: 2.25 steps
+→ Email tends to keep users exploring more—it’s part of multi-touch journeys.
+
+paid_search: 2.625 steps
+→ Paid search customers take the longest paths before converting or dropping off.
+
+app: 1.0 step
+→ App users cross-sell immediately—it’s not a browsing node.
+
+web: 1.0 step
+→ When users hit web, they quickly convert or drop off.
+
+*Longer paths (start, paid_search, email) → users need guidance to reach conversion.
+*Shorter paths (web, app) → users quickly convert or cross-sell.
+
+Action:
+
+- For channels with longer paths, push next best touchpoints (email → web, paid_search → web) to accelerate conversion.
+
+- For channels with short paths (web), ensure UX and content are optimized, as users make quick decisions here.
+
+
+
+
+
+
