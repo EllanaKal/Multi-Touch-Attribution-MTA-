@@ -1,0 +1,201 @@
+import pandas as pd
+import numpy as np
+from collections import Counter
+import math
+
+# -------------------------
+# ingestion steps
+# -------------------------
+def paths_to_transitions(paths_df, path_col="path", sep=">"):
+    rows = []
+    for p in paths_df[path_col]:
+        if isinstance(p, str):
+            touches = [t.strip() for t in p.split(sep) if t.strip() != ""]
+        elif isinstance(p, (list, tuple)):
+            touches = [t for t in p if t]
+        else:
+            continue
+        for a, b in zip(touches, touches[1:]):
+            rows.append((a, b))
+    transition_df = pd.DataFrame(rows, columns=["from", "to"])
+    return transition_df
+
+def build_transition_counts(transition_df):
+    counts = transition_df.groupby(["from","to"]).size().reset_index(name="count")
+    probs = counts.copy()
+    probs["prob"] = probs.groupby("from")["count"].transform(lambda s: s / s.sum())
+    return counts, probs
+
+# -------------------------
+# Matrix utilities
+# -------------------------
+def states_from_probs(probs_df):
+    states = sorted(set(probs_df['from']).union(set(probs_df['to'])))
+    return states
+
+def build_transition_matrix(probs_df, states, absorbing_states=None):
+    n = len(states)
+    idx = {s:i for i,s in enumerate(states)}
+    P = np.zeros((n,n))
+    for _, row in probs_df.iterrows():
+        i, j = idx[row['from']], idx[row['to']]
+        P[i,j] = row['prob']
+    if absorbing_states:
+        for s in absorbing_states:
+            if s in idx:
+                i = idx[s]
+                P[i,:] = 0.0
+                P[i,i] = 1.0
+    return P, idx
+
+# -------------------------
+# Absorbing Markov analysis
+# -------------------------
+def absorbing_markov_metrics(P, states, absorbing_states):
+    n = P.shape[0]
+    idx = {s:i for i,s in enumerate(states)}
+    absorbing_idx = [idx[s] for s in absorbing_states]
+    non_absorbing_idx = [i for i in range(n) if i not in absorbing_idx]
+
+    if len(non_absorbing_idx) == 0:
+        raise ValueError("No transient (non-absorbing) states found.")
+
+    Q = P[np.ix_(non_absorbing_idx, non_absorbing_idx)]
+    R = P[np.ix_(non_absorbing_idx, absorbing_idx)]
+
+    I = np.eye(Q.shape[0])
+    try:
+        N = np.linalg.inv(I - Q)
+    except np.linalg.LinAlgError:
+        N = np.linalg.pinv(I - Q)
+
+    B = N.dot(R)
+    t = N.dot(np.ones((N.shape[1],)))
+
+    transient_states = [states[i] for i in non_absorbing_idx]
+    absorbers = [states[i] for i in absorbing_idx]
+
+    absorption_probs = pd.DataFrame(B, index=transient_states, columns=absorbers)
+    expected_steps = pd.Series(t, index=transient_states, name="expected_steps_to_absorption")
+
+    return absorption_probs, expected_steps, N
+
+# -------------------------
+# Channel removal (attribution)
+# -------------------------
+def compute_removal_effects(probs_df, states, absorbing_states, channel_list=None):
+    P_base, idx = build_transition_matrix(probs_df, states, absorbing_states=absorbing_states)
+    absorption_probs, expected_steps, N = absorbing_markov_metrics(P_base, states, absorbing_states)
+    transient_states = absorption_probs.index.tolist()
+
+    start_idx = [i for i,s in enumerate(states) if s not in absorbing_states]
+    start_vec = np.zeros(len(states))
+    for i in start_idx:
+        start_vec[i] = 1.0 / len(start_idx)
+
+    # collapse start distribution to conversion probability
+    conv_cols = [c for c in absorption_probs.columns if "conversion" in c.lower() or "purchase" in c.lower()]
+    base_conv_per_transient = absorption_probs[conv_cols].sum(axis=1).values if len(conv_cols)>0 else absorption_probs.iloc[:,0].values
+    start_transient = np.array([start_vec[states.index(s)] for s in transient_states])
+    base_total_conversion = float((start_transient * base_conv_per_transient).sum())
+
+    if channel_list is None:
+        channel_list = [s for s in states if s not in absorbing_states]
+
+    rows = []
+    for ch in channel_list:
+        if ch not in states:
+            continue
+        df_mod = probs_df.copy()
+        df_mod = df_mod[~(df_mod['from']==ch)].copy()
+        P_mod, idx_mod = build_transition_matrix(df_mod, states, absorbing_states=absorbing_states)
+        absorption_mod, _, _ = absorbing_markov_metrics(P_mod, states, absorbing_states)
+        mod_conv_per_transient = absorption_mod[conv_cols].sum(axis=1).values if len(conv_cols)>0 else absorption_mod.iloc[:,0].values
+        mod_total_conversion = float((start_transient * mod_conv_per_transient).sum())
+        delta = base_total_conversion - mod_total_conversion
+        pct = delta / base_total_conversion if base_total_conversion > 0 else np.nan
+        rows.append({
+            "channel": ch,
+            "base_total_conversion": base_total_conversion,
+            "mod_total_conversion": mod_total_conversion,
+            "absolute_impact": delta,
+            "relative_impact_pct": pct
+        })
+    removal_df = pd.DataFrame(rows).sort_values("absolute_impact", ascending=False)
+    return removal_df, base_total_conversion
+
+# -------------------------
+# summarize top paths
+# -------------------------
+def get_top_n_paths(paths_df, path_col="path", sep=">", n=20):
+    def normalize_path(p):
+        if isinstance(p, str):
+            return ">".join([t.strip() for t in p.split(sep) if t.strip() != ""])
+        elif isinstance(p, (list, tuple)):
+            return ">".join([t for t in p if t])
+        else:
+            return ""
+    paths_norm = paths_df[path_col].apply(normalize_path)
+    counts = paths_norm.value_counts().reset_index()
+    counts.columns = ["path", "count"]
+    return counts.head(n)
+
+# -------------------------
+# usage: end-to-end
+# -------------------------
+if __name__ == "__main__":
+    example = [
+        "start>email>web>conversion",
+        "start>paid_search>web>conversion",
+        "start>email>app>cross_sell",
+        "start>paid_search>email>web>dropoff",
+        "start>social>web>conversion",
+        "start>social>web>cross_sell",
+        "start>direct>web>dropoff",
+        "start>affiliate>web>conversion",
+        "start>email>direct>web>conversion",
+    ]
+    paths_df = pd.DataFrame({"path": example})
+    transition_df = paths_to_transitions(paths_df, path_col="path", sep=">")
+    counts, probs = build_transition_counts(transition_df)
+
+    absorbing_states = ["conversion", "cross_sell", "dropoff"]
+    states = states_from_probs(probs)
+    P, idx = build_transition_matrix(probs, states, absorbing_states)
+    absorption_probs, expected_steps, N = absorbing_markov_metrics(P, states, absorbing_states)
+
+    print("Absorption probabilities:\n", absorption_probs)
+    print("\nExpected steps to absorption:\n", expected_steps)
+
+    # Aggregate KPIs
+    conv_cols = [c for c in absorption_probs.columns if "conversion" in c.lower() or "purchase" in c.lower()]
+    cross_cols = [c for c in absorption_probs.columns if "cross" in c.lower()]
+    drop_cols = [c for c in absorption_probs.columns if "drop" in c.lower()]
+
+    transient_states = absorption_probs.index.tolist()
+    start_transient_vec = np.zeros(len(transient_states))
+    if "start" in transient_states:
+        start_transient_vec[transient_states.index("start")] = 1.0
+    else:
+        start_transient_vec[:] = 1.0 / len(transient_states)
+
+    total_conversion = float((start_transient_vec * absorption_probs[conv_cols].sum(axis=1).values).sum()) if len(conv_cols)>0 else np.nan
+    total_crosssell = float((start_transient_vec * absorption_probs[cross_cols].sum(axis=1).values).sum()) if len(cross_cols)>0 else np.nan
+    total_dropoff = float((start_transient_vec * absorption_probs[drop_cols].sum(axis=1).values).sum()) if len(drop_cols)>0 else np.nan
+
+    print("\nAggregated KPIs from start distribution:")
+    print("Total conversion probability:", total_conversion)
+    print("Total cross-sell probability:", total_crosssell)
+    print("Total dropoff probability:", total_dropoff)
+
+    removal_df, base_total_conversion = compute_removal_effects(probs, states, absorbing_states)
+    print("\nChannel removal (absolute & relative impact on total conversion):\n", removal_df)
+
+    print("\nTop paths:\n", get_top_n_paths(paths_df, "path", sep=">", n=10))
+
+    # First-touch conversion rate
+    first_touch_series = paths_df['path'].apply(lambda p: p.split(">")[1].strip() if isinstance(p, str) and ">" in p else None)
+    converted_mask = paths_df['path'].str.contains("conversion", na=False)
+    first_touch_conv = paths_df[converted_mask]['path'].apply(lambda p: p.split(">")[1].strip() if isinstance(p, str) and ">" in p else None)
+    first_touch_conv_rate = first_touch_conv.value_counts() / first_touch_series.value_counts()
+    print("\nFirst-touch conversion rate (sample):\n", first_touch_conv_rate.dropna())
